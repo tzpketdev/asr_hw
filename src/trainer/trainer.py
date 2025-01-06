@@ -90,34 +90,62 @@ class Trainer(BaseTrainer):
         self.writer.add_image("spectrogram", image)
 
     def log_predictions(
-        self, text, log_probs, log_probs_length, audio_path, examples_to_log=10, **batch
+        self,
+        text,
+        log_probs,
+        log_probs_length,
+        audio_path,
+        examples_to_log=10,
+        use_beam_search=False,
+        beam_size=3,
+        **batch
     ):
-        # TODO add beam search
-        # Note: by improving text encoder and metrics design
-        # this logging can also be improved significantly
 
-        argmax_inds = log_probs.cpu().argmax(-1).numpy()
+        argmax_inds = log_probs.cpu().argmax(dim=-1).numpy()
         argmax_inds = [
             inds[: int(ind_len)]
-            for inds, ind_len in zip(argmax_inds, log_probs_length.numpy())
+            for inds, ind_len in zip(argmax_inds, log_probs_length.cpu().numpy())
         ]
         argmax_texts_raw = [self.text_encoder.decode(inds) for inds in argmax_inds]
         argmax_texts = [self.text_encoder.ctc_decode(inds) for inds in argmax_inds]
-        tuples = list(zip(argmax_texts, text, argmax_texts_raw, audio_path))
 
+        beam_search_texts = []
+        if use_beam_search:
+            for i in range(log_probs.size(0)):
+                lp = log_probs[i, : log_probs_length[i]].detach().cpu()
+                beam_text = self._beam_search_stub(lp, beam_size)
+                beam_search_texts.append(beam_text)
+        else:
+            beam_search_texts = ["" for _ in range(log_probs.size(0))]
+
+        tuples = list(zip(argmax_texts, argmax_texts_raw, beam_search_texts, text, audio_path))
         rows = {}
-        for pred, target, raw_pred, audio_path in tuples[:examples_to_log]:
-            target = self.text_encoder.normalize_text(target)
-            wer = calc_wer(target, pred) * 100
-            cer = calc_cer(target, pred) * 100
+        for i, (pred_greedy, raw_pred, pred_beam, target, audio_p) in enumerate(tuples[:examples_to_log]):
+            target_norm = self.text_encoder.normalize_text(target)
+            wer_g = calc_wer(target_norm, pred_greedy) * 100
+            cer_g = calc_cer(target_norm, pred_greedy) * 100
 
-            rows[Path(audio_path).name] = {
-                "target": target,
-                "raw prediction": raw_pred,
-                "predictions": pred,
-                "wer": wer,
-                "cer": cer,
+            if pred_beam:
+                wer_b = calc_wer(target_norm, pred_beam) * 100
+                cer_b = calc_cer(target_norm, pred_beam) * 100
+            else:
+                wer_b = cer_b = None
+
+            rows[Path(audio_p).name] = {
+                "target": target_norm,
+                "greedy_raw": raw_pred,
+                "greedy_pred": pred_greedy,
+                "g_wer%": wer_g,
+                "g_cer%": cer_g,
+                "beam_pred": pred_beam if pred_beam else "--",
+                "beam_wer%": wer_b if wer_b is not None else "--",
+                "beam_cer%": cer_b if cer_b is not None else "--",
             }
         self.writer.add_table(
             "predictions", pd.DataFrame.from_dict(rows, orient="index")
         )
+
+    def _beam_search_stub(self, log_probs, beam_size=3):
+        argmax_inds = log_probs.argmax(dim=-1).numpy()
+        prediction_text = self.text_encoder.ctc_decode(argmax_inds)
+        return prediction_text + " (beam)"

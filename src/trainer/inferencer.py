@@ -101,60 +101,48 @@ class Inferencer(BaseTrainer):
     def process_batch(self, batch_idx, batch, metrics, part):
         """
         Run batch through the model, compute metrics, and
-        save predictions to disk.
-
-        Save directory is defined by save_path in the inference
-        config and current partition.
+        (optionally) save predictions to disk.
 
         Args:
             batch_idx (int): the index of the current batch.
             batch (dict): dict-based batch containing the data from
                 the dataloader.
             metrics (MetricTracker): MetricTracker object that computes
-                and aggregates the metrics. The metrics depend on the type
-                of the partition (train or inference).
-            part (str): name of the partition. Used to define proper saving
-                directory.
-        Returns:
-            batch (dict): dict-based batch containing the data from
-                the dataloader (possibly transformed via batch transform)
-                and model outputs.
-        """
-        # TODO change inference logic so it suits ASR assignment
-        # and task pipeline
+                and aggregates the metrics (e.g. CER, WER).
+            part (str): name of the partition (for save_path if used).
 
+        Returns:
+            batch (dict): updated batch with model outputs, if needed.
+        """
         batch = self.move_batch_to_device(batch)
-        batch = self.transform_batch(batch)  # transform batch on device -- faster
+        batch = self.transform_batch(batch)
 
         outputs = self.model(**batch)
         batch.update(outputs)
 
-        if metrics is not None:
+        if metrics is not None and "inference" in self.metrics:
             for met in self.metrics["inference"]:
                 metrics.update(met.name, met(**batch))
 
-        # Some saving logic. This is an example
-        # Use if you need to save predictions on disk
+        if self.save_path is not None:
+            batch_size = batch["log_probs"].shape[0]
+            current_id = batch_idx * batch_size
 
-        batch_size = batch["logits"].shape[0]
-        current_id = batch_idx * batch_size
+            for i in range(batch_size):
 
-        for i in range(batch_size):
-            # clone because of
-            # https://github.com/pytorch/pytorch/issues/1995
-            logits = batch["logits"][i].clone()
-            label = batch["labels"][i].clone()
-            pred_label = logits.argmax(dim=-1)
+                log_probs_i = batch["log_probs"][i].detach().cpu()
+                length_i = batch["log_probs_length"][i].detach().cpu()
 
-            output_id = current_id + i
+                argmax_inds = torch.argmax(log_probs_i[:length_i], dim=-1).numpy()
+                predicted_text = self.text_encoder.ctc_decode(argmax_inds)
 
-            output = {
-                "pred_label": pred_label,
-                "label": label,
-            }
+                reference_text = batch.get("text", [""] * batch_size)[i]
 
-            if self.save_path is not None:
-                # you can use safetensors or other lib here
+                output_id = current_id + i
+                output = {
+                    "ref_text": reference_text,
+                    "pred_text": predicted_text,
+                }
                 torch.save(output, self.save_path / part / f"output_{output_id}.pth")
 
         return batch
