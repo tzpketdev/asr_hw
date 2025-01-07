@@ -33,7 +33,7 @@ class Trainer(BaseTrainer):
                 model outputs, and losses.
         """
         batch = self.move_batch_to_device(batch)
-        batch = self.transform_batch(batch)  # transform batch on device -- faster
+        batch = self.transform_batch(batch)
 
         metric_funcs = self.metrics["inference"]
         if self.is_train:
@@ -42,23 +42,22 @@ class Trainer(BaseTrainer):
 
         outputs = self.model(**batch)
         batch.update(outputs)
-
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
 
         if self.is_train:
-            batch["loss"].backward()  # sum of all losses is always called loss
+            batch["loss"].backward()  # sum of all losses is always in batch["loss"]
             self._clip_grad_norm()
             self.optimizer.step()
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
-        # update metrics for each loss (in case of multiple losses)
         for loss_name in self.config.writer.loss_names:
             metrics.update(loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
             metrics.update(met.name, met(**batch))
+
         return batch
 
     def _log_batch(self, batch_idx, batch, mode="train"):
@@ -73,14 +72,9 @@ class Trainer(BaseTrainer):
             mode (str): train or inference. Defines which logging
                 rules to apply.
         """
-        # method to log data from you batch
-        # such as audio, text or images, for example
-
-        # logging scheme might be different for different partitions
-        if mode == "train":  # the method is called only every self.log_step steps
+        if mode == "train":
             self.log_spectrogram(**batch)
         else:
-            # Log Stuff
             self.log_spectrogram(**batch)
             self.log_predictions(**batch)
 
@@ -101,6 +95,7 @@ class Trainer(BaseTrainer):
         **batch
     ):
 
+
         argmax_inds = log_probs.cpu().argmax(dim=-1).numpy()
         argmax_inds = [
             inds[: int(ind_len)]
@@ -119,9 +114,11 @@ class Trainer(BaseTrainer):
             beam_search_texts = ["" for _ in range(log_probs.size(0))]
 
         tuples = list(zip(argmax_texts, argmax_texts_raw, beam_search_texts, text, audio_path))
+
         rows = {}
         for i, (pred_greedy, raw_pred, pred_beam, target, audio_p) in enumerate(tuples[:examples_to_log]):
             target_norm = self.text_encoder.normalize_text(target)
+
             wer_g = calc_wer(target_norm, pred_greedy) * 100
             cer_g = calc_cer(target_norm, pred_greedy) * 100
 
@@ -135,17 +132,12 @@ class Trainer(BaseTrainer):
                 "target": target_norm,
                 "greedy_raw": raw_pred,
                 "greedy_pred": pred_greedy,
-                "g_wer%": wer_g,
-                "g_cer%": cer_g,
+                "greedy_WER%": wer_g,
+                "greedy_CER%": cer_g,
                 "beam_pred": pred_beam if pred_beam else "--",
-                "beam_wer%": wer_b if wer_b is not None else "--",
-                "beam_cer%": cer_b if cer_b is not None else "--",
+                "beam_WER%": wer_b if wer_b is not None else "--",
+                "beam_CER%": cer_b if cer_b is not None else "--",
             }
         self.writer.add_table(
             "predictions", pd.DataFrame.from_dict(rows, orient="index")
         )
-
-    def _beam_search_stub(self, log_probs, beam_size=3):
-        argmax_inds = log_probs.argmax(dim=-1).numpy()
-        prediction_text = self.text_encoder.ctc_decode(argmax_inds)
-        return prediction_text + " (beam)"

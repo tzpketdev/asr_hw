@@ -15,16 +15,16 @@ class Inferencer(BaseTrainer):
     """
 
     def __init__(
-        self,
-        model,
-        config,
-        device,
-        dataloaders,
-        text_encoder,
-        save_path,
-        metrics=None,
-        batch_transforms=None,
-        skip_model_load=False,
+            self,
+            model,
+            config,
+            device,
+            dataloaders,
+            text_encoder,
+            save_path,
+            metrics=None,
+            batch_transforms=None,
+            skip_model_load=False,
     ):
         """
         Initialize the Inferencer.
@@ -36,10 +36,10 @@ class Inferencer(BaseTrainer):
             dataloaders (dict[DataLoader]): dataloaders for different
                 sets of data.
             text_encoder (CTCTextEncoder): text encoder.
-            save_path (str): path to save model predictions and other
-                information.
+            save_path (Path): path to save model predictions and other
+                information (can be None if you don't want to save).
             metrics (dict): dict with the definition of metrics for
-                inference (metrics[inference]). Each metric is an instance
+                inference (metrics["inference"]). Each metric is an instance
                 of src.metrics.BaseMetric.
             batch_transforms (dict[nn.Module] | None): transforms that
                 should be applied on the whole batch. Depend on the
@@ -50,7 +50,7 @@ class Inferencer(BaseTrainer):
                 Inferencer Class.
         """
         assert (
-            skip_model_load or config.inferencer.get("from_pretrained") is not None
+                skip_model_load or config.inferencer.get("from_pretrained") is not None
         ), "Provide checkpoint or set skip_model_load=True"
 
         self.config = config
@@ -67,7 +67,6 @@ class Inferencer(BaseTrainer):
         self.evaluation_dataloaders = {k: v for k, v in dataloaders.items()}
 
         # path definition
-
         self.save_path = save_path
 
         # define metrics
@@ -81,16 +80,15 @@ class Inferencer(BaseTrainer):
             self.evaluation_metrics = None
 
         if not skip_model_load:
-            # init model
+            # init model weights from checkpoint
             self._from_pretrained(config.inferencer.get("from_pretrained"))
 
     def run_inference(self):
         """
-        Run inference on each partition.
+        Run inference on each partition (e.g. test, valid, etc.)
 
         Returns:
-            part_logs (dict): part_logs[part_name] contains logs
-                for the part_name partition.
+            part_logs (dict): part_logs[partition] = logs (dict of metrics)
         """
         part_logs = {}
         for part, dataloader in self.evaluation_dataloaders.items():
@@ -129,10 +127,8 @@ class Inferencer(BaseTrainer):
             current_id = batch_idx * batch_size
 
             for i in range(batch_size):
-
                 log_probs_i = batch["log_probs"][i].detach().cpu()
                 length_i = batch["log_probs_length"][i].detach().cpu()
-
                 argmax_inds = torch.argmax(log_probs_i[:length_i], dim=-1).numpy()
                 predicted_text = self.text_encoder.ctc_decode(argmax_inds)
 
@@ -143,35 +139,36 @@ class Inferencer(BaseTrainer):
                     "ref_text": reference_text,
                     "pred_text": predicted_text,
                 }
+
                 torch.save(output, self.save_path / part / f"output_{output_id}.pth")
 
         return batch
 
     def _inference_part(self, part, dataloader):
         """
-        Run inference on a given partition and save predictions
+        Inference for a specific partition (e.g. 'test').
+        We pass every batch through process_batch and gather metrics.
 
         Args:
-            part (str): name of the partition.
-            dataloader (DataLoader): dataloader for the given partition.
-        Returns:
-            logs (dict): metrics, calculated on the partition.
-        """
+            part (str): partition name.
+            dataloader (DataLoader): Dataloader with data for partition.
 
+        Returns:
+            logs (dict): metrics results for this partition.
+        """
         self.is_train = False
         self.model.eval()
 
         self.evaluation_metrics.reset()
 
-        # create Save dir
         if self.save_path is not None:
             (self.save_path / part).mkdir(exist_ok=True, parents=True)
 
         with torch.no_grad():
             for batch_idx, batch in tqdm(
-                enumerate(dataloader),
-                desc=part,
-                total=len(dataloader),
+                    enumerate(dataloader),
+                    desc=part,
+                    total=len(dataloader),
             ):
                 batch = self.process_batch(
                     batch_idx=batch_idx,

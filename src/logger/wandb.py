@@ -49,7 +49,7 @@ class WandBWriter:
                 entity=entity,
                 config=project_config,
                 name=run_name,
-                resume="allow",  # resume the run if run_id existed
+                resume="allow",
                 id=self.run_id,
                 mode=mode,
                 save_code=kwargs.get("save_code", False),
@@ -60,8 +60,6 @@ class WandBWriter:
             logger.warning("For use wandb install it via \n\t pip install wandb")
 
         self.step = 0
-        # the mode is usually equal to the current partition name
-        # used to separate Partition1 and Partition2 metrics
         self.mode = ""
         self.timer = datetime.now()
 

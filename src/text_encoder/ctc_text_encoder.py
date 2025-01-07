@@ -1,25 +1,11 @@
 import re
 from string import ascii_lowercase
-
 import torch
-
-# TODO add CTC decode
-# TODO add BPE, LM, Beam Search support
-# Note: think about metrics and encoder
-# The design can be remarkably improved
-# to calculate stuff more efficiently and prettier
-
 
 class CTCTextEncoder:
     EMPTY_TOK = ""
 
     def __init__(self, alphabet=None, **kwargs):
-        """
-        Args:
-            alphabet (list): alphabet for language. If None, it will be
-                set to ascii
-        """
-
         if alphabet is None:
             alphabet = list(ascii_lowercase + " ")
 
@@ -33,44 +19,41 @@ class CTCTextEncoder:
         return len(self.vocab)
 
     def __getitem__(self, item: int):
-        assert type(item) is int
+        assert isinstance(item, int)
         return self.ind2char[item]
 
     def encode(self, text) -> torch.Tensor:
         text = self.normalize_text(text)
         try:
-            return torch.Tensor([self.char2ind[char] for char in text]).unsqueeze(0)
+            return torch.tensor(
+                [self.char2ind[char] for char in text],
+                dtype=torch.long
+            )
         except KeyError:
-            unknown_chars = set([char for char in text if char not in self.char2ind])
+            unknown_chars = [char for char in text if char not in self.char2ind]
             raise Exception(
                 f"Can't encode text '{text}'. Unknown chars: '{' '.join(unknown_chars)}'"
             )
 
     def decode(self, inds) -> str:
-        """
-        Raw decoding without CTC.
-        Used to validate the CTC decoding implementation.
+        return "".join(
+            [self.ind2char[int(ind)] for ind in inds]
+        ).strip()
 
-        Args:
-            inds (list): list of tokens.
-        Returns:
-            raw_text (str): raw text with empty tokens and repetitions.
-        """
-        return "".join([self.ind2char[int(ind)] for ind in inds]).strip()
+    def ctc_decode(self, inds) -> str:
+        decoded_chars = []
+        prev_char = None
+        for i in inds:
+            char = self.ind2char[int(i)]
+            if char == self.EMPTY_TOK:
+                prev_char = None
+                continue
+            if char == prev_char:
+                continue
+            decoded_chars.append(char)
+            prev_char = char
 
-    def ctc_decode(self, inds, decode_sy=[]) -> str:
-        prev = None
-        for ind in inds:
-          cur = self.ind2char[int(ind)]
-          if cur == self.EMPTY_TOK:
-            prev = None
-            continue
-          if cur == prev:
-            continue
-          decode_sy.append(cur)
-          prev = cur
-        decode_ret = "".join(decode_sy).strip()
-        return decode_ret
+        return "".join(decoded_chars).strip()
 
     @staticmethod
     def normalize_text(text: str):
