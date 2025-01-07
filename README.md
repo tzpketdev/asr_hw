@@ -59,7 +59,7 @@ Follow these steps to install the project:
 To train a model, run the following command:
 
 ```bash
-python3 train.py -cn=CONFIG_NAME HYDRA_CONFIG_ARGUMENTS
+python3 train.py
 ```
 
 Where `CONFIG_NAME` is a config from `src/configs` and `HYDRA_CONFIG_ARGUMENTS` are optional arguments.
@@ -67,9 +67,11 @@ Where `CONFIG_NAME` is a config from `src/configs` and `HYDRA_CONFIG_ARGUMENTS` 
 To run inference (evaluate the model or save predictions):
 
 ```bash
-python3 inference.py HYDRA_CONFIG_ARGUMENTS
+python3 inference.py
 ```
-
+## Report wandb
+https://wandb.ai/mts_dig/pytorch_template_asr_example/
+All parameters have default values.
 ## Credits
 
 This repository is based on a [PyTorch Project Template](https://github.com/Blinorot/pytorch_project_template).
